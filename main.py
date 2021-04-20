@@ -1,17 +1,42 @@
 import pygame
+from pygame import Rect
 from warnings import warn
 from collections import namedtuple
+
+import random
+
+from classes import Node, Graph, Options
+
+
+pygame.init()
+pygame.font.init()
+FONT = pygame.font.SysFont(None, 24)
+
 
 NODE_SIZE = 10
 LINE_WIDTH = 3
 
+JIGGLE = 0.1
+
+CWHITE = (255, 255, 255)
+CBLACK = (0, 0, 0)
+CRED = (255, 0, 0)
+CYELLOW = (255, 255, 0)
+CGREEN = (0, 255, 0)
+CCYAN = (0, 255, 255)
+CBLUE = (0, 0, 255)
+CMAGENTA = (255, 0, 255)
+
 COLOR_BG = (150, 150, 150)
-COLOR_NODE = (255, 255, 255)
-COLOR_LINE = (255, 255, 255)
+COLOR_LINE = CWHITE
 
 WIN_SIZE = (800, 800)
 WIN_MIDDLE = (400, 400)
 WIN_SCALE = 50
+
+GRID_WIDTH = 5
+GRID_HEIGHT = 3
+GRID_SPACING = 1
 
 
 def pixels(pos):
@@ -46,9 +71,9 @@ def realpos(pixels):
         warn("Invalid arguemnt for realpos")
 
 
-def draw_node(surf, pos):
+def draw_node(surf, node):
 
-    pygame.draw.circle(surf, COLOR_NODE, pixels(pos), NODE_SIZE)
+    pygame.draw.circle(surf, node.color, pixels(node.pos), NODE_SIZE)
 
 
 def draw_line(surf, pos1, pos2):
@@ -60,110 +85,42 @@ def draw_graph(surf, graph):
 
     for node in graph.get_nodes():
 
-        draw_node(surf, node.pos)
+        draw_node(surf, node)
 
     for edge in graph.get_edges():
         draw_line(surf, edge[0].pos, edge[1].pos)
 
 
+def draw_options(surf, opt):
+
+    winw, winh = surf.get_size()
+
+    # Draw the squares for the three options
+    pygame.draw.rect(surf, CRED, opt.rectx)
+    surf.blit(FONT.render("X", True, CBLACK), opt.rectx.move(opt.pad, opt.pad))
+
+    pygame.draw.rect(surf, CGREEN, opt.recty)
+    surf.blit(FONT.render("Y", True, CBLACK), opt.recty.move(opt.pad, opt.pad))
+
+    pygame.draw.rect(surf, CBLUE, opt.rectz)
+    surf.blit(FONT.render("Z", True, CBLACK), opt.rectz.move(opt.pad, opt.pad))
+
+    pygame.draw.rect(surf, CWHITE, opt.rectc)
+    surf.blit(FONT.render("LC", True, CBLACK),
+              opt.rectc.move(opt.pad, opt.pad))
+
+    # Draw the gold square around current option
+    pygame.draw.rect(surf, CYELLOW, opt.get_rect(), width=opt.width)
+
+
 # =====
 
 
-class Node:
-
-    def __init__(self, x, y=None):
-
-        if y is None:
-            self.pos = x
-        else:
-            self.pos = (x, y)
+def rand():
+    return random.random()
 
 
-class Graph:
-
-    def __init__(self):
-
-        self._nodes = []
-        self._edges = []
-
-    def get_neighbors(self, node):
-
-        if node not in self._nodes:
-            warn("Tried to find neighbors of unavailable node")
-            return []
-
-        nbs = []
-
-        for e in self._edges:
-            if node == e[0]:
-                nbs.append(e[1])
-            if node == e[1]:
-                nbs.append(e[0])
-
-        return nbs
-
-    def add_node(self, node):
-
-        if node in self._nodes:
-            warn("Tried to add already existing node")
-        else:
-            self._nodes.append(node)
-
-    def remove_node(self, node):
-
-        if node not in self._nodes:
-            warn("Tried to remove already existing node")
-        else:
-            self._nodes.remove(node)
-
-    def get_nodes(self):
-
-        return self._nodes.copy()
-
-    def is_edge(self, node1, node2):
-
-        return ((node1, node2) in self._edges) or ((node2, node1) in self._edges)
-
-    def add_edge(self, node1, node2):
-
-        if self.is_edge(node1, node2):
-            warn("Tried to add already existing edge")
-        elif node1 == node2:
-            warn("Self-edges not supported")
-        else:
-            self._edges.append((node1, node2))
-
-    def remove_edge(self, node1, node2):
-
-        if (node1, node2) in self._edges:
-            self._edges.remove((node1, node2))
-        elif (node2, node1) in self._edges:
-            self._edges.remove((node2, node1))
-        else:
-            warn("Tried to remove non-existing edge")
-
-    def flip_edge(self, node1, node2):
-
-        if self.is_edge(node1, node2):
-            self.remove_edge(node1, node2)
-        else:
-            self.add_edge(node1, node2)
-
-    def get_edges(self):
-
-        return self._edges.copy()
-
-    def apply_complement(self, node):
-
-        neighbors = self.get_neighbors(node)
-        num = len(neighbors)
-
-        for i in range(num):
-            for j in range(i):
-                self.flip_edge(neighbors[i], neighbors[j])
-
-
-def grid_graph(width, height, spacing=1, centering=(0, 0)):
+def grid_graph(width, height, spacing=1, centering=(0, 0), jiggle=0):
 
     graph = Graph()
 
@@ -178,7 +135,11 @@ def grid_graph(width, height, spacing=1, centering=(0, 0)):
 
         for j in range(height):
 
-            node = Node((left + spacing * i, bottom + spacing * j))
+            jigx = jiggle * rand()
+            jigy = jiggle * rand()
+
+            node = Node((left + spacing * i + jigx,
+                         bottom + spacing * j + jigy))
             col.append(node)
             graph.add_node(node)
 
@@ -195,21 +156,58 @@ def grid_graph(width, height, spacing=1, centering=(0, 0)):
     return graph
 
 
-Game = namedtuple("Game", ["graph"])
+def apply_rule(node, graph, mode):
+
+    if mode == "x":
+
+        nbs = graph.get_neighbors(node)
+
+        if len(nbs) > 0:
+            bnode = random.choice(nbs)
+            graph.complement(bnode)
+            graph.complement(node)
+            graph.disconnect(node)
+            graph.complement(bnode)
+
+        node.color = CBLACK
+
+    elif mode == "y":
+
+        graph.complement(node)
+        graph.disconnect(node)
+        node.color = CBLACK
+
+    elif mode == "z":
+
+        graph.disconnect(node)
+        node.color = CBLACK
+
+    elif mode == "c":
+
+        graph.complement(node)
+
+Game = namedtuple("Game", ["graph", "options"])
 
 
 def init():
 
-    pygame.init()
     screen = pygame.display.set_mode(WIN_SIZE)
     screen.fill(COLOR_BG)
     pygame.display.update()
 
-    graph = grid_graph(3, 3, 3)
-
-    game = Game(graph)
+    game = new_game(screen)
 
     return screen, game
+
+
+def new_game(screen):
+
+    graph = grid_graph(GRID_WIDTH, GRID_HEIGHT, GRID_SPACING, jiggle=JIGGLE)
+    options = Options(screen)
+
+    game = Game(graph, options)
+
+    return game
 
 
 def update(screen, game):
@@ -217,6 +215,7 @@ def update(screen, game):
     screen.fill(COLOR_BG)
 
     draw_graph(screen, game.graph)
+    draw_options(screen, game.options)
 
     pygame.display.update()
 
@@ -237,11 +236,36 @@ if __name__ == "__main__":
 
             elif ev.type == pygame.MOUSEBUTTONUP:
 
+                # LEFT MOUSE BUTTON
                 if ev.button == 1:
+
+                    rx, ry, rz, rc = (game.options.rectx,
+                                      game.options.recty,
+                                      game.options.rectz,
+                                      game.options.rectc)
+
+                    if rx.collidepoint(ev.pos):
+                        game.options.set_mode("x")
+                    if ry.collidepoint(ev.pos):
+                        game.options.set_mode("y")
+                    if rz.collidepoint(ev.pos):
+                        game.options.set_mode("z")
+                    if rc.collidepoint(ev.pos):
+                        game.options.set_mode("c")
+
                     for n in game.graph.get_nodes():
                         npos = pixels(n.pos)
                         if (npos[0] - ev.pos[0])**2 + (npos[1] - ev.pos[1])**2 <= NODE_SIZE**2:
-                            game.graph.apply_complement(n)
+                            apply_rule(n, game.graph, game.options.get_mode())
+
+                # RIGHT MOUSE BUTTON
+                if ev.button == 3:
+                    pass
+
+            elif ev.type == pygame.KEYDOWN:
+
+                if ev.key == pygame.K_r:
+                    game = new_game(screen)
 
         update(screen, game)
 
